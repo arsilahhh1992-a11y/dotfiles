@@ -1,96 +1,71 @@
 #!/bin/bash
-set -e
+set -uo pipefail
+exec > >(tee -a "$HOME/dotfiles-install.log") 2>&1
+echo "[dotfiles] start $(date -Is)"
 
-# ============================================================
-# 1. Zona waktu WIB (dari dotfiles lama)
-# ============================================================
-sudo ln -sf /usr/share/zoneinfo/Asia/Jakarta /etc/localtime
+sudo ln -sf /usr/share/zoneinfo/Asia/Jakarta /etc/localtime || true
 
-# ============================================================
-# 2. Tools (wget dari dotfiles lama + deps build untuk pyenv)
-# ============================================================
-sudo apt-get update
-sudo apt-get install -y wget curl git build-essential libssl-dev zlib1g-dev \
-  libbz2-dev libreadline-dev libsqlite3-dev libncursesw5-dev xz-utils \
-  tk-dev libxml2-dev libxmlsec1-dev libffi-dev liblzma-dev
+sudo apt-get update -y
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+  wget curl git build-essential libssl-dev zlib1g-dev \
+  libbz2-dev libreadline-dev libsqlite3-dev libncursesw5-dev \
+  xz-utils tk-dev libxml2-dev libxmlsec1-dev libffi-dev liblzma-dev
 
-# ============================================================
-# 3. pyenv + Python 3.13
-# ============================================================
-if [ ! -d "$HOME/.pyenv" ]; then
-  curl -fsSL https://pyenv.run | bash
+# --- Python: coba deadsnakes dulu (cepat), fallback pyenv ---
+if ! command -v python3.13 >/dev/null 2>&1; then
+  sudo apt-get install -y software-properties-common || true
+  sudo add-apt-repository -y ppa:deadsnakes/ppa || true
+  sudo apt-get update -y || true
+  sudo apt-get install -y python3.13 python3.13-venv python3.13-dev python3-pip || true
 fi
 
-export PYENV_ROOT="$HOME/.pyenv"
-export PATH="$PYENV_ROOT/bin:$PATH"
-eval "$(pyenv init -)"
+if command -v python3.13 >/dev/null 2>&1; then
+  PYTHON=python3.13
+else
+  # fallback pyenv
+  if [ ! -d "$HOME/.pyenv" ]; then
+    curl -fsSL https://pyenv.run | bash || true
+  fi
+  export PYENV_ROOT="$HOME/.pyenv"
+  export PATH="$PYENV_ROOT/bin:$PATH"
+  eval "$(pyenv init -)" || true
+  pyenv install -s 3.13.9 || pyenv install -s 3.12.8 || true
+  pyenv global 3.13.9 2>/dev/null || pyenv global 3.12.8 2>/dev/null || true
+  PYTHON=python
+fi
 
-pyenv install -s 3.13.9
-pyenv global 3.13.9
-pyenv rehash
+$PYTHON -m pip install --upgrade pip || true
 
-# ============================================================
-# 4. Upgrade pip (dari dotfiles lama — sekarang di Python 3.13)
-# ============================================================
-python -m pip install --upgrade pip
-
-# ============================================================
-# 5. Shortcut `py` → Python 3.13
-# ============================================================
+# shortcut py
 mkdir -p "$HOME/bin"
 cat > "$HOME/bin/py" << 'EOF'
 #!/bin/bash
-# py bot.py  ==  python 3.13 bot.py
-exec python "$@"
+exec python3.13 "$@" 2>/dev/null || exec python "$@"
 EOF
 chmod +x "$HOME/bin/py"
 
-# ============================================================
-# 6. Persist pyenv + ~/bin di bash/zsh
-# ============================================================
+# PATH persist
 for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
   touch "$rc"
-  if ! grep -q 'PYENV_ROOT' "$rc" 2>/dev/null; then
-    cat >> "$rc" << 'EOF'
-
-# --- pyenv + Python 3.13 + shortcut py ---
+  grep -q 'PYENV_ROOT\|HOME/bin' "$rc" 2>/dev/null || cat >> "$rc" << 'EOF'
 export PYENV_ROOT="$HOME/.pyenv"
 export PATH="$HOME/bin:$PYENV_ROOT/bin:$PATH"
-if command -v pyenv >/dev/null 2>&1; then
-  eval "$(pyenv init -)"
-fi
+command -v pyenv >/dev/null && eval "$(pyenv init -)"
 EOF
-  fi
 done
+export PATH="$HOME/bin:${PYENV_ROOT:-$HOME/.pyenv}/bin:$PATH"
 
-export PATH="$HOME/bin:$PYENV_ROOT/bin:$PATH"
-eval "$(pyenv init -)"
-
-# ============================================================
-# 7. Install requirements.txt pakai Python 3.13
-# ============================================================
-# Cari requirements di workspace Codespace (repo yang di-clone)
+# requirements
 REQ=""
-if [ -n "${CODESPACE_VSCODE_FOLDER:-}" ] && [ -f "${CODESPACE_VSCODE_FOLDER}/requirements.txt" ]; then
-  REQ="${CODESPACE_VSCODE_FOLDER}/requirements.txt"
-elif [ -f "/workspaces/loketsecuredbunchookie/requirements.txt" ]; then
-  REQ="/workspaces/loketsecuredbunchookie/requirements.txt"
-else
-  # fallback: requirements.txt pertama di /workspaces/*
-  REQ="$(find /workspaces -maxdepth 2 -name requirements.txt 2>/dev/null | head -n 1 || true)"
-fi
-
+[ -n "${CODESPACE_VSCODE_FOLDER:-}" ] && [ -f "$CODESPACE_VSCODE_FOLDER/requirements.txt" ] && REQ="$CODESPACE_VSCODE_FOLDER/requirements.txt"
+[ -z "$REQ" ] && [ -n "${RepositoryName:-}" ] && [ -f "/workspaces/$RepositoryName/requirements.txt" ] && REQ="/workspaces/$RepositoryName/requirements.txt"
+[ -z "$REQ" ] && REQ="$(find /workspaces -maxdepth 2 -name requirements.txt 2>/dev/null | head -n 1 || true)"
 if [ -n "$REQ" ] && [ -f "$REQ" ]; then
-  echo "Installing requirements from: $REQ"
-  python -m pip install -r "$REQ"
+  echo "Installing: $REQ"
+  $PYTHON -m pip install -r "$REQ" || true
 else
-  echo "WARNING: requirements.txt tidak ditemukan — skip pip install -r"
+  echo "WARNING: requirements.txt tidak ditemukan"
 fi
 
-# ============================================================
-# 8. Verifikasi
-# ============================================================
-echo "=== setup selesai ==="
-echo "python : $(python --version 2>&1) @ $(which python)"
-echo "py     : $(py --version 2>&1) @ $(which py)"
-echo "pip    : $(python -m pip --version 2>&1)"
+echo "=== selesai ==="
+$PYTHON --version; which $PYTHON; which py || true
