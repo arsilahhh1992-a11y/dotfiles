@@ -1,100 +1,85 @@
+cat > ~/dotfiles/install.sh << 'EOF'
 #!/bin/bash
 set -e
 
-# ============================================================
-# 1. Zona waktu WIB (dari dotfiles lama)
-# ============================================================
+echo "=== 1. Setting Timezone ke Asia/Jakarta ==="
 sudo ln -sf /usr/share/zoneinfo/Asia/Jakarta /etc/localtime
 
-# ============================================================
-# 2. Tools (wget dari dotfiles lama + deps build untuk pyenv)
-# ============================================================
+echo "=== 2. Update System & Install Dependencies pyenv ==="
 sudo apt-get update
 sudo apt-get install -y wget curl git build-essential libssl-dev zlib1g-dev \
   libbz2-dev libreadline-dev libsqlite3-dev libncurses-dev xz-utils \
   tk-dev libxml2-dev libxmlsec1-dev libffi-dev liblzma-dev
 
-# ============================================================
-# 3. pyenv + Python 3.13
-# ============================================================
-if [ ! -d "\$HOME/.pyenv" ]; then
+echo "=== 3. Setup pyenv & Install Python 3.13.2 ==="
+if [ ! -d "$HOME/.pyenv" ]; then
   curl -fsSL https://pyenv.run | bash
 fi
 
-# FIX: Daftarkan dan muat path secara instan ke sesi saat ini 
-# agar perintah 'pyenv' langsung dikenali tanpa menunggu restart shell
-export PYENV_ROOT="\$HOME/.pyenv"
-export PATH="\(PYENV_ROOT/bin:\)PATH"
-eval "\$(pyenv init -)"
+export PYENV_ROOT="$HOME/.pyenv"
+export PATH="$PYENV_ROOT/bin:$PATH"
+eval "$(pyenv init - bash)"
 
-# --- OPTIMALISASI: Gunakan semua core CPU agar compile berjalan lancar & cepat ---
-export MAKEFLAGS="-j\$(nproc)"
+# Gunakan semua core CPU agar proses kompilasi cepat
+export MAKEFLAGS="-j$(nproc)"
 
-pyenv install -s 3.13.9
-pyenv global 3.13.9
+pyenv install -s 3.13.2
+pyenv global 3.13.2
 pyenv rehash
 
-# ============================================================
-# 4. Upgrade pip (dari dotfiles lama — sekarang di Python 3.13)
-# ============================================================
+echo "=== 4. Upgrade Pip ==="
 python -m pip install --upgrade pip
 
-# ============================================================
-# 5. Shortcut `py` → Python 3.13
-# ============================================================
-mkdir -p "\$HOME/bin"
-cat > "\$HOME/bin/py" << 'EOF'
+echo "=== 5. Buat Shortcut `py` -> `python 3.13` ==="
+mkdir -p "$HOME/bin"
+cat > "$HOME/bin/py" << 'INNER_EOF'
 #!/bin/bash
-# py bot.py  ==  python 3.13 bot.py
-exec python "\$@"
-EOF
-chmod +x "\$HOME/bin/py"
+exec python "$@"
+INNER_EOF
+chmod +x "$HOME/bin/py"
 
-# ============================================================
-# 6. Persist pyenv + ~/bin di bash/zsh
-# ============================================================
-for rc in "HOME/.bashrc" "HOME/.zshrc"; do
-  touch "\$rc"
-  if ! grep -q 'PYENV_ROOT' "\$rc" 2>/dev/null; then
-    cat >> "\$rc" << 'EOF'
+echo "=== 6. Konfigurasi Permanen di Shell (.bashrc & .zshrc) ==="
+for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+  touch "$rc"
+  if ! grep -q 'PYENV_ROOT' "$rc" 2>/dev/null; then
+    cat >> "$rc" << 'INNER_EOF'
 
 # --- pyenv + Python 3.13 + shortcut py ---
-export PYENV_ROOT="\$HOME/.pyenv"
-export PATH="\$HOME/bin:\(PYENV_ROOT/bin:\)PATH"
+export PYENV_ROOT="$HOME/.pyenv"
+export PATH="$HOME/bin:$PYENV_ROOT/bin:$PATH"
 if command -v pyenv >/dev/null 2>&1; then
-  eval "\$(pyenv init -)"
+  eval "$(pyenv init - bash)"
 fi
-EOF
+INNER_EOF
   fi
 done
 
-export PATH="\$HOME/bin:\(PYENV_ROOT/bin:\)PATH"
-eval "\$(pyenv init -)"
+export PATH="$HOME/bin:$PYENV_ROOT/bin:$PATH"
+eval "$(pyenv init - bash)"
 
-# ============================================================
-# 7. Install requirements.txt pakai Python 3.13
-# ============================================================
+echo "=== 7. Auto Install requirements.txt ==="
 REQ=""
-if [ -n "\({CODESPACE_VSCODE_FOLDER:-}" ] && [ -f "\){CODESPACE_VSCODE_FOLDER}/requirements.txt" ]; then
-  REQ="\${CODESPACE_VSCODE_FOLDER}/requirements.txt"
+if [ -n "${CODESPACE_VSCODE_FOLDER:-}" ] && [ -f "${CODESPACE_VSCODE_FOLDER}/requirements.txt" ]; then
+  REQ="${CODESPACE_VSCODE_FOLDER}/requirements.txt"
 elif [ -f "/workspaces/loketsecuredbunchookie/requirements.txt" ]; then
   REQ="/workspaces/loketsecuredbunchookie/requirements.txt"
 else
-  # fallback: mencari di workspace saat ini
-  REQ="\$(find /workspaces -maxdepth 2 -name requirements.txt 2>/dev/null | head -n 1 || true)"
+  REQ="$(find /workspaces -maxdepth 2 -name requirements.txt 2>/dev/null | head -n 1 || true)"
 fi
 
-if [ -n "\(REQ" ] && [ -f "\)REQ" ]; then
-  echo "Installing requirements from: \$REQ"
-  python -m pip install -r "\$REQ"
+if [ -n "$REQ" ] && [ -f "$REQ" ]; then
+  echo "Installing requirements from: $REQ"
+  python -m pip install -r "$REQ"
 else
   echo "WARNING: requirements.txt tidak ditemukan — skip pip install -r"
 fi
 
-# ============================================================
-# 8. Verifikasi
-# ============================================================
-echo "=== setup selesai ==="
-echo "python : \((python --version 2>&1) @\)(which python)"
-echo "py     : \((py --version 2>&1) @\)(which py)"
-echo "pip    : \$(python -m pip --version 2>&1)"
+echo "=== 8. Verifikasi Instalasi ==="
+echo "Timezone : $(date)"
+echo "python   : $(python --version 2>&1) @$(which python)"
+echo "py       : $(py --version 2>&1) @$(which py)"
+echo "pip      : $(python -m pip --version 2>&1)"
+echo "=== Setup Selesai! ==="
+EOF
+
+chmod +x ~/dotfiles/install.sh
